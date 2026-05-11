@@ -16,37 +16,94 @@ def load_GMR_src_file(src_file):
     """Load from GMR source file"""
     with open(src_file, "rb") as f:
         motion_data = pkl.load(f)
+    # G1 
+    # joint_names = [
+    #     "left_hip_pitch_joint",
+    #     "left_hip_roll_joint",
+    #     "left_hip_yaw_joint",
+    #     "left_knee_joint",
+    #     "left_ankle_pitch_joint",
+    #     "left_ankle_roll_joint",
+    #     "right_hip_pitch_joint",
+    #     "right_hip_roll_joint",
+    #     "right_hip_yaw_joint",
+    #     "right_knee_joint",
+    #     "right_ankle_pitch_joint",
+    #     "right_ankle_roll_joint",
+    #     "waist_yaw_joint",
+    #     "waist_roll_joint",
+    #     "waist_pitch_joint",
+    #     "left_shoulder_pitch_joint",
+    #     "left_shoulder_roll_joint",
+    #     "left_shoulder_yaw_joint",
+    #     "left_elbow_joint",
+    #     "left_wrist_roll_joint",
+    #     "left_wrist_pitch_joint",
+    #     "left_wrist_yaw_joint",
+    #     "right_shoulder_pitch_joint",
+    #     "right_shoulder_roll_joint",
+    #     "right_shoulder_yaw_joint",
+    #     "right_elbow_joint",
+    #     "right_wrist_roll_joint",
+    #     "right_wrist_pitch_joint",
+    #     "right_wrist_yaw_joint",
+    # ]
+    
+    # atom01 joint names order in GMR
     joint_names = [
-        "left_hip_pitch_joint",
-        "left_hip_roll_joint",
-        "left_hip_yaw_joint",
+        "left_thigh_yaw_joint",
+        "left_thigh_roll_joint",
+        "left_thigh_pitch_joint",
         "left_knee_joint",
         "left_ankle_pitch_joint",
         "left_ankle_roll_joint",
-        "right_hip_pitch_joint",
-        "right_hip_roll_joint",
-        "right_hip_yaw_joint",
+        "right_thigh_yaw_joint",
+        "right_thigh_roll_joint",
+        "right_thigh_pitch_joint",
         "right_knee_joint",
         "right_ankle_pitch_joint",
         "right_ankle_roll_joint",
-        "waist_yaw_joint",
-        "waist_roll_joint",
-        "waist_pitch_joint",
-        "left_shoulder_pitch_joint",
-        "left_shoulder_roll_joint",
-        "left_shoulder_yaw_joint",
-        "left_elbow_joint",
-        "left_wrist_roll_joint",
-        "left_wrist_pitch_joint",
-        "left_wrist_yaw_joint",
-        "right_shoulder_pitch_joint",
-        "right_shoulder_roll_joint",
-        "right_shoulder_yaw_joint",
-        "right_elbow_joint",
-        "right_wrist_roll_joint",
-        "right_wrist_pitch_joint",
-        "right_wrist_yaw_joint",
+        "torso_joint",
+        "left_arm_pitch_joint",
+        "left_arm_roll_joint",
+        "left_arm_yaw_joint",
+        "left_elbow_pitch_joint",
+        "left_elbow_yaw_joint",
+        "right_arm_pitch_joint",
+        "right_arm_roll_joint",
+        "right_arm_yaw_joint",
+        "right_elbow_pitch_joint",
+        "right_elbow_yaw_joint",
     ]
+    
+    # RP1 joint names order in GMR
+    # joint_names = [
+    #     "left_hip_pitch_joint",
+    #     "left_hip_roll_joint",
+    #     "left_hip_yaw_joint",
+    #     "left_knee_joint",
+    #     "left_ankle_pitch_joint",
+    #     "left_ankle_roll_joint",
+    #     "right_hip_pitch_joint",
+    #     "right_hip_roll_joint",
+    #     "right_hip_yaw_joint",
+    #     "right_knee_joint",
+    #     "right_ankle_pitch_joint",
+    #     "right_ankle_roll_joint",
+    #     "waist_roll_joint",
+    #     "waist_yaw_joint",
+    #     "left_shoulder_pitch_joint",
+    #     "left_shoulder_roll_joint",
+    #     "left_shoulder_yaw_joint",
+    #     "left_elbow_joint",
+    #     "left_wrist_joint",
+    #     "right_shoulder_pitch_joint",
+    #     "right_shoulder_roll_joint",
+    #     "right_shoulder_yaw_joint",
+    #     "right_elbow_joint",
+    #     "right_wrist_joint",
+    # ]
+    
     joint_pos = motion_data["dof_pos"]  # (N, 29)
     base_pos_w = motion_data["root_pos"]  # (N, 3)
     base_quat_w_ = motion_data["root_rot"]  # (N, 4), xyzw order
@@ -66,13 +123,13 @@ def convert_file(
     urdf: str,
     src_frame_name: str,
     tgt_frame_name: str,
-    joints_to_revert: list = ["waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"],
+    joints_to_revert: list = [],
 ):
     src_file, tgt_file = src_tgt_pairs
 
     src_npz = load_GMR_src_file(src_file)
 
-    with open(urdf) as f:
+    with open(urdf, 'rb') as f:
         robot_chain = pk.build_chain_from_urdf(f.read())
 
     joint_pos = torch.as_tensor(src_npz["joint_pos"], dtype=torch.float32)
@@ -83,7 +140,6 @@ def convert_file(
         rot=src_base_quat_w,  # wxyz order
         pos=src_base_pos_w,  # xyz order
     )
-
     # reverse joint names to match the new robot urdf if needed
     for joint_name in joints_to_revert:
         joint_idx_src = joint_names.index(joint_name)
@@ -119,13 +175,20 @@ def convert_file(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--src", type=str, help="Input file or folder")
-    parser.add_argument("--tgt", type=str, help="Target file or folder. Structure preserved if folder")
+    parser.add_argument("--src", type=str, 
+                        default="atom01_gmr",
+                        help="Input file or folder")
+    parser.add_argument("--tgt", type=str, 
+                        default="atom01_lab",
+                        help="Target file or folder. Structure preserved if folder")
     parser.add_argument(
-        "--urdf", type=str, help="Robot urdf to convert the base, does not need to match the source base or target base"
+        "--urdf", type=str, 
+        default="instinctlab/source/instinctlab/instinctlab/assets/resources/atom01/urdf/atom01.urdf",
+        # default="instinctlab/source/instinctlab/instinctlab/assets/resources/rp1/urdf/rp1.urdf",
+        help="Robot urdf to convert the base, does not need to match the source base or target base"
     )
-    parser.add_argument("--src_frame", type=str, default="pelvis")
-    parser.add_argument("--tgt_frame", type=str, default="torso_link")
+    parser.add_argument("--src_frame", type=str, default="base_link") # pelvis for G1
+    parser.add_argument("--tgt_frame", type=str, default="base_link")
     parser.add_argument("--num_cpus", default=10)
 
     args = parser.parse_args()

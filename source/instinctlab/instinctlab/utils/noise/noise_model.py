@@ -22,8 +22,15 @@ if TYPE_CHECKING:
         GaussianBlurNoiseCfg,
         ImageNoiseCfg,
         LatencyNoiseCfg,
+        PerlinNoiseCfg,
+        PixelFailureNoiseCfg,
         RandomGaussianNoiseCfg,
+        RangeBasedGaussianNoiseCfg,
+        RandomConvNoiseCfg,
+        ScaleRandomizationNoiseCfg,
         SensorDeadNoiseCfg,
+        StereoTooCloseNoiseCfg,
+        StereoFusionNoiseCfg,
     )
 
 
@@ -590,6 +597,142 @@ def random_gaussian_noise(
     else:
         noisy_data = data
 
+    return noisy_data
+
+
+def stereo_fusion_noise(
+    data: torch.Tensor,
+    cfg: StereoFusionNoiseCfg,
+    env_ids: torch.Tensor | Sequence[int],
+) -> torch.Tensor:
+    """Simulate stereo consistency-check holes caused by occlusion or low-texture regions."""
+    if random.random() > cfg.apply_probability:
+        return data
+
+    # Process on single channel mask, then broadcast to all channels.
+    depth = data.mean(dim=-1, keepdim=True)
+    depth_chw = depth.permute(0, 3, 1, 2)
+
+    # Edge/occlusion candidate: large local gradients.
+    grad_x = torch.abs(depth_chw[:, :, :, 1:] - depth_chw[:, :, :, :-1])
+    grad_y = torch.abs(depth_chw[:, :, 1:, :] - depth_chw[:, :, :-1, :])
+    grad = torch.zeros_like(depth_chw)
+    grad[:, :, :, 1:] += grad_x
+    grad[:, :, :, :-1] += grad_x
+    grad[:, :, 1:, :] += grad_y
+    grad[:, :, :-1, :] += grad_y
+    occlusion_mask = grad > cfg.disparity_grad_threshold
+
+    # Low-texture candidate: small local depth variance proxy.
+    avg_pool = torch.nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
+    local_mean = avg_pool(depth_chw)
+    local_var = avg_pool((depth_chw - local_mean) ** 2)
+    low_texture_mask = local_var < cfg.texture_var_threshold
+
+    candidate_mask = occlusion_mask | low_texture_mask
+    hole_seed = torch.rand_like(depth_chw) < cfg.hole_probability
+    hole_mask = candidate_mask & hole_seed
+
+    if cfg.hole_kernel_size > 1:
+        hole_mask = F.max_pool2d(
+            hole_mask.to(torch.float32),
+            kernel_size=cfg.hole_kernel_size,
+            stride=1,
+            padding=cfg.hole_kernel_size // 2,
+        ) > 0.0
+
+    noisy_data = data.clone()
+    noisy_data[hole_mask.permute(0, 2, 3, 1).expand_as(noisy_data)] = cfg.hole_value
+    return noisy_data
+
+
+def random_conv_noise(
+    data: torch.Tensor,
+    cfg: RandomConvNoiseCfg,
+    env_ids: torch.Tensor | Sequence[int],
+) -> torch.Tensor:
+    """Apply a randomized 3x3 convolution to mimic local optical distortion artifacts."""
+    if random.random() > cfg.apply_probability:
+        return data
+
+    x = data.permute(0, 3, 1, 2)
+    c = x.shape[1]
+
+    kernel = torch.randn((1, 1, 3, 3), device=x.device) * cfg.kernel_std
+    kernel[:, :, 1, 1] += cfg.center_weight
+    kernel = kernel / kernel.abs().sum(dim=(-2, -1), keepdim=True).clamp_min(1e-6)
+    kernel = kernel.repeat(c, 1, 1, 1)
+
+    conv = torch.nn.Conv2d(c, c, kernel_size=3, stride=1, padding=1, groups=c, bias=False).to(x.device)
+    with torch.no_grad():
+        conv.weight.copy_(kernel)
+    conv.weight.requires_grad_(False)
+    noisy_data = conv(x)
+    noisy_data = noisy_data.permute(0, 2, 3, 1)
+    return noisy_data
+
+
+def perlin_noise(
+    data: torch.Tensor,
+    cfg: PerlinNoiseCfg,
+    env_ids: torch.Tensor | Sequence[int],
+) -> torch.Tensor:
+    """Add multi-octave spatially correlated noise (Perlin-style fractal noise)."""
+    if random.random() > cfg.apply_probability:
+        return data
+
+    n, h, w, _ = data.shape
+    noise = torch.zeros((n, 1, h, w), device=data.device)
+
+    frequency = max(1.0, cfg.base_frequency)
+    amplitude = cfg.amplitude
+
+    for _ in range(cfg.octaves):
+        gh = max(2, int(round(h / frequency)))
+        gw = max(2, int(round(w / frequency)))
+        octave = torch.randn((n, 1, gh, gw), device=data.device)
+        octave = F.interpolate(octave, size=(h, w), mode="bilinear", align_corners=False)
+        noise += amplitude * octave
+        frequency *= cfg.lacunarity
+        amplitude *= cfg.persistence
+
+    std = noise.std(dim=(-2, -1), keepdim=True).clamp_min(1e-6)
+    noise = noise / std
+
+    noisy_data = data + cfg.noise_std * noise.permute(0, 2, 3, 1)
+    return noisy_data
+
+
+def scale_randomization_noise(
+    data: torch.Tensor,
+    cfg: ScaleRandomizationNoiseCfg,
+    env_ids: torch.Tensor | Sequence[int],
+) -> torch.Tensor:
+    """Randomize global depth scale per-frame/per-environment to mimic calibration drift."""
+    if random.random() > cfg.apply_probability:
+        return data
+
+    n = data.shape[0]
+    scales = torch.empty((n, 1, 1, 1), device=data.device).uniform_(cfg.scale_min, cfg.scale_max)
+    return data * scales
+
+
+def pixel_failure_noise(
+    data: torch.Tensor,
+    cfg: PixelFailureNoiseCfg,
+    env_ids: torch.Tensor | Sequence[int],
+) -> torch.Tensor:
+    """Simulate dead or saturated sensor pixels."""
+    if random.random() > cfg.apply_probability:
+        return data
+
+    noisy_data = data.clone()
+    rand_map = torch.rand_like(noisy_data)
+    dead_mask = rand_map < cfg.dead_pixel_prob
+    sat_mask = (rand_map >= cfg.dead_pixel_prob) & (rand_map < (cfg.dead_pixel_prob + cfg.saturated_pixel_prob))
+
+    noisy_data[dead_mask] = cfg.dead_value
+    noisy_data[sat_mask] = cfg.saturated_value
     return noisy_data
 
 

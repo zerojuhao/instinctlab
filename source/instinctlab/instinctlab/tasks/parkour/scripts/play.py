@@ -34,7 +34,7 @@ parser.add_argument("--agent_cfg", action="store_true", default=False, help="Loa
 parser.add_argument("--sample", action="store_true", default=False, help="Sample actions instead of using the policy.")
 parser.add_argument("--zero_act_until", type=int, default=0, help="Zero actions until this timestep.")
 parser.add_argument("--keyboard_control", action="store_true", default=False, help="Enable keyboard control.")
-parser.add_argument("--keyboard_linvel_step", type=float, default=0.5, help="Linear velocity change per keyboard step.")
+parser.add_argument("--keyboard_linvel_step", type=float, default=0.1, help="Linear velocity change per keyboard step.")
 parser.add_argument("--keyboard_angvel", type=float, default=1.0, help="Angular velocity set by keyboard.")
 
 # append Instinct-RL cli arguments
@@ -56,14 +56,14 @@ import gymnasium as gym
 import torch
 
 import carb.input
-import omni.appwindow
+import omni
 from carb.input import KeyboardEventType
 from instinct_rl.runners import OnPolicyRunner
 from instinct_rl.utils.utils import get_obs_slice, get_subobs_by_components, get_subobs_size
 
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.io import load_pickle, load_yaml
+from isaaclab.utils.io import  load_yaml
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
 # Import extensions to set up environment tasks
@@ -114,8 +114,8 @@ def main():
         log_dir = os.path.join(log_root_path, agent_cfg.run_name + "_play")
         resume_path = "model_scratch.pt"
 
-    if args_cli.env_cfg:
-        env_cfg = load_pickle(os.path.join(log_dir, "params", "env.pkl"))
+    # if args_cli.env_cfg:
+    #     env_cfg = load_pickle(os.path.join(log_dir, "params", "env.pkl"))
     if args_cli.agent_cfg:
         agent_cfg_dict = load_yaml(os.path.join(log_dir, "params", "agent.yaml"))
     else:

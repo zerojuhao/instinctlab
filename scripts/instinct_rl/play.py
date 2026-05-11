@@ -21,7 +21,7 @@ parser.add_argument(
 )
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-parser.add_argument("--exportonnx", action="store_true", default=False, help="Export policy as ONNX model.")
+parser.add_argument("--exportonnx", action="store_true", default=True, help="Export policy as ONNX model.")
 parser.add_argument("--debug", action="store_true", default=False, help="Enable debug mode.")
 parser.add_argument("--no_resume", default=None, action="store_true", help="Force play in no resume mode.")
 # custom play arguments

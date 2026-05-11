@@ -53,6 +53,15 @@ class MultiRewardManager(RewardManager):
                     self.num_envs, dtype=torch.float, device=self.device
                 )
 
+        # per-environment term weights: dict[group_name][term_name] -> tensor(num_envs,)
+        self._per_env_term_weights: dict[str, dict[str, torch.Tensor]] = dict()
+        for group_name in self.__group_term_cfgs.keys():
+            self._per_env_term_weights[group_name] = dict()
+            for term_name, term_cfg in zip(self.__group_term_names[group_name], self.__group_term_cfgs[group_name]):
+                self._per_env_term_weights[group_name][term_name] = torch.full(
+                    (self.num_envs,), float(term_cfg.weight), dtype=torch.float, device=self.device
+                )
+
     def __str__(self) -> str:
         """Returns: A string representation for reward manager."""
         msg = f"<MultiRewardManager> contains {len(self.__group_term_names)} active groups.\n"
@@ -103,11 +112,12 @@ class MultiRewardManager(RewardManager):
         extras = {}
         for key in self._episode_sums.keys():
             episodic_sum_avg = torch.mean(self._episode_sums[key][env_ids])
-            extras["Episode_Reward/" + key + "/max_episode_len_s"] = episodic_sum_avg / self._env.max_episode_length_s
-            extras["Episode_Reward/" + key + "/sum"] = episodic_sum_avg
-            extras["Episode_Reward/" + key + "/timestep"] = torch.mean(
-                self._episode_sums[key][env_ids] / self._env.episode_length_buf[env_ids]
-            )
+            extras["Episode_Reward/" + key] = episodic_sum_avg / self._env.max_episode_length_s
+            # extras["Episode_Reward/" + key + "/max_episode_len_s"] = episodic_sum_avg / self._env.max_episode_length_s
+            # extras["Episode_Reward/" + key + "/sum"] = episodic_sum_avg
+            # extras["Episode_Reward/" + key + "/timestep"] = torch.mean(
+            #     self._episode_sums[key][env_ids] / self._env.episode_length_buf[env_ids]
+            # )
             # reset episodic sum
             self._episode_sums[key][env_ids] = 0.0
         # reset all the reward terms
@@ -135,10 +145,20 @@ class MultiRewardManager(RewardManager):
             term_combine_method = self.__group_term_combine_methods.get(group_name, "sum")
             for term_name, term_cfg in zip(self.__group_term_names[group_name], terms_cfgs):
                 # skip if weight is zero (kind of a micro-optimization)
-                if term_cfg.weight == 0.0:
+                # if all per-env weights are zero, skip whole term
+                per_env_weights = self._per_env_term_weights.get(group_name, {}).get(term_name, None)
+                if per_env_weights is not None and torch.allclose(per_env_weights, torch.zeros_like(per_env_weights)):
+                    continue
+                # fallback: if no per-env buffer, skip if term_cfg.weight == 0
+                if per_env_weights is None and term_cfg.weight == 0.0:
                     continue
                 # compute the term's value
-                value = term_cfg.func(self._env, **term_cfg.params) * term_cfg.weight
+                value = term_cfg.func(self._env, **term_cfg.params)
+                # apply per-env weights when available, otherwise use scalar weight
+                if per_env_weights is not None:
+                    value = value * per_env_weights
+                else:
+                    value = value * term_cfg.weight
                 # update the reward buffer
                 if term_combine_method == "sum":
                     self._reward_buf[group_name] += value * dt
@@ -171,6 +191,68 @@ class MultiRewardManager(RewardManager):
             raise ValueError(f"Term '{term_name}' not found in group '{group_name}'.")
         index = self.__group_term_names[group_name].index(term_name)
         return self.__group_term_cfgs[group_name][index]
+
+    def get_per_env_term_weights(self, term_name: str, group_name: str | None = None) -> torch.Tensor:
+        """Return the per-environment weight tensor for a term.
+
+        If the manager does not have a per-env buffer for the term, this will return
+        a tensor filled with the scalar term weight.
+        """
+        if group_name is None:
+            group_name = list(self.__group_term_names.keys())[0]
+        if group_name not in self.__group_term_names:
+            raise ValueError(f"Group '{group_name}' not found.")
+        if term_name not in self.__group_term_names[group_name]:
+            raise ValueError(f"Term '{term_name}' not found in group '{group_name}'.")
+        per_env = self._per_env_term_weights.get(group_name, {}).get(term_name, None)
+        if per_env is not None:
+            return per_env
+        # fallback to scalar weight from cfg
+        index = self.__group_term_names[group_name].index(term_name)
+        term_cfg = self.__group_term_cfgs[group_name][index]
+        return torch.full((self.num_envs,), float(term_cfg.weight), dtype=torch.float, device=self.device)
+
+    def set_term_weight_for_envs(
+        self, term_name: str, env_ids: Sequence[int] | torch.Tensor, weights: float | Sequence[float] | torch.Tensor, group_name: str | None = None
+    ) -> None:
+        """Set the per-environment weights for a term on specified env indices.
+
+        Args:
+            term_name: name of the term
+            env_ids: indices of environments to update
+            weights: scalar or sequence/tensor with length equal to env_ids
+            group_name: group name; if None uses first group
+        """
+        if group_name is None:
+            group_name = list(self.__group_term_names.keys())[0]
+        if group_name not in self.__group_term_names:
+            raise ValueError(f"Group '{group_name}' not found.")
+        if term_name not in self.__group_term_names[group_name]:
+            raise ValueError(f"Term '{term_name}' not found in group '{group_name}'.")
+        # normalize env_ids to tensor
+        if not isinstance(env_ids, torch.Tensor):
+            env_idx = torch.tensor(list(env_ids), dtype=torch.long, device=self.device)
+        else:
+            env_idx = env_ids.to(device=self.device)
+        # ensure per-env buffer exists
+        if group_name not in self._per_env_term_weights:
+            self._per_env_term_weights[group_name] = dict()
+        if term_name not in self._per_env_term_weights[group_name]:
+            # initialize from scalar cfg
+            index = self.__group_term_names[group_name].index(term_name)
+            term_cfg = self.__group_term_cfgs[group_name][index]
+            self._per_env_term_weights[group_name][term_name] = torch.full(
+                (self.num_envs,), float(term_cfg.weight), dtype=torch.float, device=self.device
+            )
+        buf = self._per_env_term_weights[group_name][term_name]
+        # prepare weights tensor
+        if isinstance(weights, (float, int)):
+            w = torch.full((env_idx.shape[0],), float(weights), dtype=torch.float, device=self.device)
+        else:
+            w = torch.as_tensor(list(weights), dtype=torch.float, device=self.device)
+            if w.numel() != env_idx.numel():
+                raise ValueError("weights length must match env_ids length")
+        buf[env_idx] = w
 
     def get_active_iterable_terms(self, env_idx: int) -> Sequence[tuple[str, Sequence[float]]]:
         terms = []

@@ -31,7 +31,7 @@ class EncoderConfigs:
 @configclass
 class MoEPolicyCfg(InstinctRlEncoderMoEActorCriticCfg):
     init_noise_std = 1.0
-    num_moe_experts = 4
+    num_moe_experts = 10
     actor_hidden_dims = [256, 128, 64]
     critic_hidden_dims = [256, 128, 64]
     activation = "elu"
@@ -47,23 +47,23 @@ class AmpAlgoCfg(InstinctRlPpoAlgorithmCfg):
         "nonlinearity": "ReLU",
     }
 
-    discriminator_reward_coef = 0.25
+    discriminator_reward_coef = 0.1
     discriminator_reward_type = "quad"
     discriminator_loss_func = "MSELoss"
     discriminator_gradient_penalty_coef = 5.0
     discriminator_optimizer_class_name = "AdamW"
-    discriminator_weight_decay_coef = 3e-4
-    discriminator_logit_weight_decay_coef = 0.04
+    discriminator_weight_decay_coef = 1.0e-4
+    discriminator_logit_weight_decay_coef = 1.0e-2
     discriminator_optimizer_kwargs = {
-        "lr": 1.0e-4,
+        "lr": 1.0e-3,
         "betas": [0.9, 0.999],
     }
     value_loss_coef = 1.0
     use_clipped_value_loss = True
     clip_param = 0.2
     entropy_coef = 0.006
-    num_learning_epochs = 5
-    num_mini_batches = 4
+    num_learning_epochs = 3 # 5
+    num_mini_batches = 4 # 4
     learning_rate = 1.0e-3
     schedule = "adaptive"
     gamma = 0.99
@@ -73,13 +73,13 @@ class AmpAlgoCfg(InstinctRlPpoAlgorithmCfg):
 
 
 @configclass
-class G1ParkourPPORunnerCfg(InstinctRlOnPolicyRunnerCfg):
+class Atom01ParkourPPORunnerCfg(InstinctRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     max_iterations = 30000
-    save_interval = 1000
-    experiment_name = "g1_parkour"
+    save_interval = 500
+    experiment_name = "atom01_parkour"
     resume = False
     load_run = ""
-    empirical_normalization = False
+    empirical_normalization = True
     policy = MoEPolicyCfg()
     algorithm = AmpAlgoCfg()
