@@ -1,0 +1,20 @@
+selected_files:
+- 07_02_retargeted.npz
+- 07_04_retargeted.npz
+- 36_01_retargeted.npz
+- 36_11_retargeted.npz
+- 114_08_retargeted.npz
+- 114_09_retargeted.npz
+- A1-_Stand_stageii_retargeted.npz
+# - B4_-_Stand_to_Walk_backwards_stageii_retargeted.npz
+- B9_-__Walk_turn_left_90_stageii_retargeted.npz
+- B10_-__Walk_turn_left_45_stageii_retargeted.npz
+- B13_-__Walk_turn_right_90_stageii_retargeted.npz
+- B14_-__Walk_turn_right_45_t2_stageii_retargeted.npz
+- B15_-__Walk_turn_around_stageii_retargeted.npz
+# - move_back_retargeted.npz
+# - move_l_retargeted.npz
+# - move_r_retargeted.npz
+- turn_l_retargeted.npz
+- turn_r_retargeted.npz
+

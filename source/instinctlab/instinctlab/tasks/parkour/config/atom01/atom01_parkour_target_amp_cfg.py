@@ -14,9 +14,9 @@ from instinctlab.tasks.parkour.config.parkour_env_cfg import ROUGH_TERRAINS_CFG,
 ATOM01_CFG.init_state.pos = (0.0, 0.0, 0.85)
 @configclass
 class AmassMotionCfg(AmassMotionCfgBase):
-    path = os.path.expanduser("/home/zym/instinct_train/atom01_lab")
+    path = os.path.expanduser("/home/zym/instinct_train/instinctlab/atom01_lab")
     retargetting_func = None
-    filtered_motion_selection_filepath = os.path.expanduser("/home/zym/instinct_train/atom01_lab/atom01.yaml")
+    filtered_motion_selection_filepath = os.path.expanduser("/home/zym/instinct_train/instinctlab/atom01_lab/atom01.yaml")
     motion_start_from_middle_range = [0.0, 0.9]
     motion_start_height_offset = 0.0
     ensure_link_below_zero_ground = False
